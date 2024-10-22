@@ -12,9 +12,9 @@
 #define DISK_FILE_PATH "/tmp/heartyfs"
 #define BLOCK_SIZE (1 << 9)
 #define DISK_SIZE (1 << 20)
-#define BLOCK_NUM (DISK_SIZE / BLOCK_SIZE)
+#define BLOCK_COUNT (DISK_SIZE / BLOCK_SIZE)
 
-#define FILE_MAX_BLOCK_NUM 119
+#define FILE_MAX_BLOCK_COUNT 119
 #define DIR_MAX_ENTRY_NUM 14
 #define NAME_MAX_LEN 28
 
@@ -36,7 +36,7 @@ struct IONode_HeartyFS {
     Byte type;
     int size;
     union {
-        int blocks[FILE_MAX_BLOCK_NUM];
+        int blocks[FILE_MAX_BLOCK_COUNT];
         struct DirEntry_HeartyFS entries[DIR_MAX_ENTRY_NUM];
     } data;
 };
