@@ -31,12 +31,6 @@ int _findStr(char *target, struct Array *arr,
     return -1;
 }
 
-bool _isDirEntryMatch(char *name, void *entry)
-{
-    char *entry_name = ((struct DirEntry_HeartyFS *)entry)->name;
-    return (strcmp(entry_name, name) == 0) ? true : false;
-}
-
 // Maps a 4 bit integer [0,15] to its count of set bits.
 const uint8_t set_bit_count_lookup[16] = {0, 1, 1, 2, 1, 2, 2, 3,
                                           1, 2, 2, 3, 2, 3, 3, 4};
@@ -124,4 +118,47 @@ int _findFreeDensestBlocks(uint8_t *map, int block_count, int (*min_bounds)[2])
     }
 
     return min_bit_range;
+}
+
+
+int _getNodeID(union Block_HeartyFS *mem, char rel_path[], int start_id)
+{
+    if (rel_path[0] == '/') {
+        errno = EINVAL;
+        return -1;
+    }
+    int id = start_id;
+    bool is_match = false;
+    char *ptr = rel_path;
+    char *substr = NULL;
+    while (_splitStr(&substr, '/', &ptr)) {
+        if (mem[id].dir.type != TYPE_DIR_HEARTY_FS)
+            break;
+
+        struct Array entries = {.val = mem[id].dir.entries,
+                                .len = mem[id].dir.len,
+                                .size = sizeof(struct DirEntry_HeartyFS)};
+        int idx = _findStr(substr, &entries, _isDirEntryMatch);
+        if (idx != -1) {
+            id = mem[id].dir.entries[idx].block_id;
+        } else {
+            id = -1;
+            break;
+        }
+    }
+    return id;
+}
+
+void _initDirEntry(union Block_HeartyFS *mem, char *name, int id, int parent_id)
+{
+    struct DirNode_HeartyFS *parent_dir = &mem[parent_id].dir;
+    strncpy(parent_dir->entries[parent_dir->len].name, name, NAME_MAX_LEN);
+    parent_dir->entries[parent_dir->len].block_id = id;
+    parent_dir->len++;
+}
+
+bool _isDirEntryMatch(char *name, void *entry)
+{
+    char *entry_name = ((struct DirEntry_HeartyFS *)entry)->name;
+    return (strcmp(entry_name, name) == 0) ? true : false;
 }

@@ -1,123 +1,128 @@
-#include "heartyfs.h"
+#include "_private_heartyfs_utils.h"
 
-#define BITMAP_LEN (BLOCK_COUNT >> 3)
-
-struct BytesAndBits {
-    unsigned int bytes;
-    unsigned char bits;
-};
-
-void *writeBlock_HeartyFS(void *mem, void *data, int block_id)
+union Block_HeartyFS *mapDisk_HeartyFS(int mode)
 {
-    if (block_id < 0 || block_id > BLOCK_COUNT) {
-        errno = EFAULT;
+    int mmap_flags;
+    switch (mode) {
+    case RDONLY_HEARTY_FS:
+        mmap_flags = PROT_READ;
+        break;
+    case WRONLY_HEARTY_FS:
+        mmap_flags = PROT_WRITE;
+        break;
+    case RDWR_HEARTY_FS:
+        mmap_flags = PROT_READ | PROT_WRITE;
+        break;
+    default:
+        errno = EINVAL;
         return NULL;
     }
-    return memcpy(mem + BLOCK_SIZE * block_id, data, BLOCK_SIZE);
-}
-
-// Maps a 4 bit integer [0,15] to its count of unset bits.
-static const Byte unset_bit_count_lookup[16] = {4, 3, 3, 2, 3, 2, 2, 1,
-                                                3, 2, 2, 1, 2, 1, 1, 0};
-
-static int countUnsetBits(Byte b)
-{
-    return unset_bit_count_lookup[b >> 4] +
-           unset_bit_count_lookup[b & 0x0F]; // Count lower and upper half
-                                             // seperately
-}
-
-static const Byte reverse_bit_lookup[16] = {0x00, 0x08, 0x04, 0x0C, 0x02, 0x0A,
-                                            0x06, 0x0E, 0x01, 0x09, 0x05, 0x0D,
-                                            0x03, 0x0B, 0x07, 0x0F};
-
-static Byte reverseBits(Byte b)
-{
-    return (reverse_bit_lookup[b & 0x0F] << 4) | reverse_bit_lookup[b >> 4];
-}
-
-static int findFirstUnsetBit(Byte b, int count)
-{
-    int found = 0;
-    Byte mask = 0x80;
-    int i;
-    for (i = 0; i < __CHAR_BIT__ && found < count; i++) {
-        if ((Byte)(~b & mask) > 0)
-            found++;
-        mask = mask >> 1;
+    int fd = open(DISK_FILE_PATH, mode);
+    if (fd < 0) {
+        perror("Cannot open the disk file\n");
+        exit(1);
     }
-    return i - 1;
-}
-
-static int findFirstFree(Byte *map, int start_idx, struct BytesAndBits *start)
-{
-    int idx = start_idx;
-    while (countUnsetBits(map[idx]) == 0 && idx < BITMAP_LEN) {
-        idx++;
+    void *buffer = mmap(NULL, DISK_SIZE, mmap_flags, MAP_SHARED, fd, 0);
+    if (buffer == MAP_FAILED) {
+        perror("Cannot map the disk file onto memory\n");
+        exit(1);
     }
-    start->bytes = idx;
-    start->bits = findFirstUnsetBit(map[idx], 1);
-    return idx;
+    return buffer;
 }
 
-static void findFreeRange(Byte *map, int start_idx, int leftover,
-                         int start_range, struct BytesAndBits *range)
+int initDir_HeartyFS(union Block_HeartyFS *mem, char *name, int id,
+                     int parent_id)
 {
-    int idx = start_idx;
-    range->bytes = start_range;
-    while (leftover > 0 && idx < BITMAP_LEN) {
-        leftover -= countUnsetBits(map[idx + range->bytes]);
-        range->bytes++;
+    struct DirNode_HeartyFS *parent_dir = &mem[parent_id].dir;
+    struct Array parent_entries = {.val = parent_dir->entries,
+                                   .len = parent_dir->len,
+                                   .size = sizeof(struct DirEntry_HeartyFS)};
+    if (parent_dir->type != TYPE_DIR_HEARTY_FS) {
+        errno = ENOTDIR;
+        return -1;
+    } else if (parent_dir->len == DIR_MAX_ENTRIES) {
+        errno = ENOSPC;
+        return -1;
+    } else if (_findStr(name, &parent_entries, _isDirEntryMatch) != -1) {
+        errno = EINVAL;
+        return -1;
     }
-    range->bits = 1 + findFirstUnsetBit(
-        map[idx + range->bytes - 1],
-        leftover + countUnsetBits(map[idx + range->bytes - 1]));
+    _initDirEntry(mem, name, id, parent_id);
+
+    strncpy(mem[id].dir.name, name, NAME_MAX_LEN);
+    mem[id].dir.type = TYPE_DIR_HEARTY_FS;
+    _initDirEntry(mem, ".", id, id);
+    _initDirEntry(mem, "..", parent_id, id);
+    return id;
 }
 
-int findFreeDensestBlocks_HeartyFS(Byte *map, int block_count,
-                                struct BytesAndBits *start_of_min)
-{
-    int min_bit_range = BLOCK_COUNT;
-    struct BytesAndBits range = {0};
-    int leftovers = block_count;
-    int idx = 0;
-    while (idx < BITMAP_LEN) {
-        struct BytesAndBits start;
-        idx = findFirstFree(map, idx, &start);
-        // printf("%d, %d, %d\n", idx, leftovers, range.bytes);
-        findFreeRange(map, idx, leftovers, range.bytes, &range);
-        int bit_count = __CHAR_BIT__ * (range.bytes - 1) - start.bits + range.bits;
+// int write_HeartyFS(char path[], void *data, int size, uint8_t mode)
+// {
+//     switch (mode) {
+//     case WRONLY_HEARTY_FS:
+//         break;
+//     case APPEND_HEARTY_FS:
+//         break;
+//     default:
+//         errno = EINVAL;
+//         return -1;
+//     }
 
-        // printf("8*(%d - 1) - %d + %d = %d\n", range.bytes, start.bits, range.bits,
-        //     bit_count);
+//     void *buffer = mapDisk_HeartyFS(mode);
+// }
 
-        if (bit_count < min_bit_range) {
-            min_bit_range = bit_count;
-            *start_of_min = start;
-            if (min_bit_range == block_count)
-                break;
-        }
-        // reset
-        leftovers = countUnsetBits(map[idx]) + range.bits;
-        range.bytes -= 2;
-        printf("%d\n", range.bytes);
-        idx++;
-    }
-    return min_bit_range;
-}
+#define STR_BOOL(b) (b) ? "true" : "false"
 
 int main()
 {
-    Byte map[BITMAP_LEN] = {0};
-    int i;
-    for (i = 0; i < BITMAP_LEN / 4; i++) {
-        map[i] = 0xFF;
+    // uint8_t map[BITMAP_LEN] = {0};
+    // memset(map, 0xFF, BITMAP_LEN);
+    // int i;
+    // for (i = 0; i < BITMAP_LEN / 4; i++) {
+    //     map[i] = 0x00;
+    // }
+    // map[i] = 0xCC;
+    // int bounds[2] = {0};
+    // unsigned int min = _findFreeDensestBlocks(map, 18, &bounds);
+    // printf("%u, %d, %d\n", min, bounds[0], bounds[1]);
+    union Block_HeartyFS *buf = mapDisk_HeartyFS(RDWR_HEARTY_FS);
+    memset(buf, 0, DISK_SIZE);
+
+    buf[0].dir.type = TYPE_DIR_HEARTY_FS;
+    if (initDir_HeartyFS(buf, "/", 0, 0)) {
+        perror("Cannot map initialize root block\n");
+        exit(1);
     }
-    map[i] = 0xCC;
-    struct BytesAndBits start = {0};
-    unsigned int min = findFreeBestBlocks_HeartyFS(map, 18, &start);
-    printf("%u, %d, %d\n", min, start.bytes, start.bits);
-    return 0;
+    memset(buf[2].bitmap, 0xFF, BITMAP_LEN);
+
+    char path[] = "./../poop/poopinit/../../../poop/../you/are/so/";
+
+    if (initDir_HeartyFS(buf, "you", 7, 0) == -1) {
+        perror("Oh no!");
+    }
+    if (initDir_HeartyFS(buf, "poop", 8, 0) == -1) {
+        perror("Oh no!");
+    }
+    if (initDir_HeartyFS(buf, "poopinit", 9, 8) == -1) {
+        perror("Oh no!");
+    }
+    if (initDir_HeartyFS(buf, "are", 3, 7) == -1) {
+        perror("Oh no!");
+    }
+    if (initDir_HeartyFS(buf, "so", 4, 3) == -1) {
+        perror("Oh no!");
+    }
+    if (initDir_HeartyFS(buf, "dun", 6, 3) == -1) {
+        perror("Oh no!");
+    }
+    int n = 0;
+    printf("type %d, name %s\n", buf[n].dir.type, buf[n].dir.name);
+    for (int i = 0; i < buf[n].dir.len; i++) {
+        printf("e#%d: %s\n", i, buf[n].dir.entries[i].name);
+    }
+    int id = _getNodeID(buf, path, 7);
+    if (id != -1)
+        printf("res: %d, %s\n", id, buf[id].dir.name);
 }
 // [1010 1010]
 // [0101 0101]

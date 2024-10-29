@@ -32,11 +32,13 @@ int _minInt(int, int);
 int _maxInt(int, int);
 bool _splitStr(char **, char, char **);
 int _findStr(char *, struct Array *, bool(char *, void *));
-bool _isDirEntryMatch(char *, void *);
 int _countSetBits(uint8_t);
 uint8_t _reverseBits(uint8_t);
 int _findFirstSetBit(uint8_t, int);
 void _findFreeBounds(uint8_t *, int, struct Interval *, struct Interval *);
 int _findFreeDensestBlocks(uint8_t *, int, int (*)[2]);
+int _getNodeID(union Block_HeartyFS *, char [], int );
+void _initDirEntry(union Block_HeartyFS *, char *, int, int);
+bool _isDirEntryMatch(char *, void *);
 
 #endif
