@@ -14,6 +14,10 @@
 #include "heartyfs.h"
 
 #define DISK_FILE_PATH "/tmp/heartyfs"
+#define ROOT_ID 0
+#define BITMAP_ID 1
+
+enum BitmapState_HeartyFS { USED_HEARTY_FS, FREE_HEARTY_FS };
 
 struct Array {
     void *val;
@@ -26,18 +30,11 @@ struct Interval {
     int end;
 };
 
-/* Private Functions */
-
-int _minInt(int, int);
-int _maxInt(int, int);
 bool _splitStr(char **, char, char **);
 int _findStr(char *, struct Array *, bool(char *, void *));
-int _countSetBits(uint8_t);
-uint8_t _reverseBits(uint8_t);
-int _findFirstSetBit(uint8_t, int);
-void _findFreeBounds(uint8_t *, int, struct Interval *, struct Interval *);
-int _findFreeDensestBlocks(uint8_t *, int, int (*)[2]);
-int _getNodeID(union Block_HeartyFS *, char [], int );
+void _updateBitmapFree(union Block_HeartyFS *mem, struct Interval bounds);
+void _updateBitmapUsed(union Block_HeartyFS *mem, struct Interval bounds);
+int _findFreeDensestBlocks(uint8_t *, int, struct Interval *);
 void _initDirEntry(union Block_HeartyFS *, char *, int, int);
 bool _isDirEntryMatch(char *, void *);
 

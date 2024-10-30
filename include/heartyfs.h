@@ -14,6 +14,8 @@
 #define NAME_MAX_LEN 28
 #define BLOCK_MAX_DATA BLOCK_SIZE - sizeof(int)
 
+#define FILE_MAX_SIZE FILE_MAX_BLOCKS *BLOCK_MAX_DATA
+
 enum InodeTypes_HeartyFS { TYPE_FILE_HEARTY_FS = 0, TYPE_DIR_HEARTY_FS = 1 };
 enum AccessModes_HeartyFS {
     RDONLY_HEARTY_FS = O_RDONLY,
@@ -53,6 +55,8 @@ union Block_HeartyFS {
     uint8_t bitmap[BITMAP_LEN];
 };
 
-union Block_HeartyFS *mapDisk_HeartyFS(int mode);
-
+union Block_HeartyFS *mapDisk_HeartyFS();
+void initSys_HeartyFS(union Block_HeartyFS *mem);
+int initDir_HeartyFS(union Block_HeartyFS *, char *, int);
+int getNodeID_HeartyFS(union Block_HeartyFS *, char[], int);
 #endif
