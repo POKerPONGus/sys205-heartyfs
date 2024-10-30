@@ -1,28 +1,13 @@
 #include "_private_heartyfs_utils.h"
 
-union Block_HeartyFS *mapDisk_HeartyFS(int mode)
+union Block_HeartyFS *mapDisk_HeartyFS()
 {
-    int mmap_flags;
-    switch (mode) {
-    case RDONLY_HEARTY_FS:
-        mmap_flags = PROT_READ;
-        break;
-    case WRONLY_HEARTY_FS:
-        mmap_flags = PROT_WRITE;
-        break;
-    case RDWR_HEARTY_FS:
-        mmap_flags = PROT_READ | PROT_WRITE;
-        break;
-    default:
-        errno = EINVAL;
-        return NULL;
-    }
-    int fd = open(DISK_FILE_PATH, mode);
+    int fd = open(DISK_FILE_PATH, O_RDWR);
     if (fd < 0) {
         perror("Cannot open the disk file\n");
         exit(1);
     }
-    void *buffer = mmap(NULL, DISK_SIZE, mmap_flags, MAP_SHARED, fd, 0);
+    void *buffer = mmap(NULL, DISK_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (buffer == MAP_FAILED) {
         perror("Cannot map the disk file onto memory\n");
         exit(1);
@@ -30,8 +15,20 @@ union Block_HeartyFS *mapDisk_HeartyFS(int mode)
     return buffer;
 }
 
-int initDir_HeartyFS(union Block_HeartyFS *mem, char *name, int id,
-                     int parent_id)
+void initSys_HeartyFS(union Block_HeartyFS *mem) {
+    memset(mem, 0, DISK_SIZE);
+
+    strncpy(mem[ROOT_ID].dir.name, "/", NAME_MAX_LEN);
+    mem[ROOT_ID].dir.type = TYPE_DIR_HEARTY_FS;
+    _initDirEntry(mem, ".", ROOT_ID, ROOT_ID);
+    _initDirEntry(mem, "..", ROOT_ID, ROOT_ID);
+    
+    memset(mem[BITMAP_ID].bitmap, 0xFF, BITMAP_LEN);
+    
+    _updateBitmapUsed(mem, (struct Interval){0, 2});
+}
+
+int initDir_HeartyFS(union Block_HeartyFS *mem, char *name, int parent_id)
 {
     struct DirNode_HeartyFS *parent_dir = &mem[parent_id].dir;
     struct Array parent_entries = {.val = parent_dir->entries,
@@ -41,12 +38,17 @@ int initDir_HeartyFS(union Block_HeartyFS *mem, char *name, int id,
         errno = ENOTDIR;
         return -1;
     } else if (parent_dir->len == DIR_MAX_ENTRIES) {
-        errno = ENOSPC;
-        return -1;
+        errno = ENOMEM;
+        return -2;
     } else if (_findStr(name, &parent_entries, _isDirEntryMatch) != -1) {
         errno = EINVAL;
         return -1;
     }
+    struct Interval id_bounds = {0};
+    _findFreeDensestBlocks(mem[1].bitmap, 1, &id_bounds);
+    _updateBitmapUsed(mem, id_bounds);
+
+    int id = id_bounds.start;
     _initDirEntry(mem, name, id, parent_id);
 
     strncpy(mem[id].dir.name, name, NAME_MAX_LEN);
@@ -56,8 +58,43 @@ int initDir_HeartyFS(union Block_HeartyFS *mem, char *name, int id,
     return id;
 }
 
-// int write_HeartyFS(char path[], void *data, int size, uint8_t mode)
+int initFile_HeartyFS(union Block_HeartyFS *mem, char *name, int parent_id)
+{
+    struct DirNode_HeartyFS *parent_dir = &mem[parent_id].dir;
+    struct Array parent_entries = {.val = parent_dir->entries,
+                                   .len = parent_dir->len,
+                                   .size = sizeof(struct DirEntry_HeartyFS)};
+    if (parent_dir->type != TYPE_DIR_HEARTY_FS) {
+        errno = ENOTDIR;
+        return -1;
+    } else if (parent_dir->len == DIR_MAX_ENTRIES) {
+        errno = ENOMEM;
+        return -1;
+    } else if (_findStr(name, &parent_entries, _isDirEntryMatch) != -1) {
+        errno = EINVAL;
+        return -1;
+    }
+    return 0;
+}
+
+int _calcFileSize(union Block_HeartyFS *mem, int id)
+{
+    int data_id = mem[id].file.blocks[mem[id].file.len - 1];
+    return (mem[id].file.len - 1) * BLOCK_MAX_DATA + mem[data_id].data.size;
+}
+
+// int write_HeartyFS(union Block_HeartyFS *mem, int id, void *data, int size,
+//                    enum AccessModes_HeartyFS mode)
 // {
+//     struct FileNode_HeartyFS *file = &mem[id].file;
+//     if (file->type != TYPE_FILE_HEARTY_FS) {
+//         errno = ENOTDIR;
+//         return -1;
+//     } else if (FILE_MAX_SIZE - _calcFileSize(mem, id) < (uint64_t)size) {
+//         errno = ENOMEM;
+//         return -1;
+//     }
+
 //     switch (mode) {
 //     case WRONLY_HEARTY_FS:
 //         break;
@@ -67,62 +104,31 @@ int initDir_HeartyFS(union Block_HeartyFS *mem, char *name, int id,
 //         errno = EINVAL;
 //         return -1;
 //     }
-
-//     void *buffer = mapDisk_HeartyFS(mode);
 // }
 
-#define STR_BOOL(b) (b) ? "true" : "false"
-
-int main()
+int getNodeID_HeartyFS(union Block_HeartyFS *mem, char rel_path[], int start_id)
 {
-    // uint8_t map[BITMAP_LEN] = {0};
-    // memset(map, 0xFF, BITMAP_LEN);
-    // int i;
-    // for (i = 0; i < BITMAP_LEN / 4; i++) {
-    //     map[i] = 0x00;
-    // }
-    // map[i] = 0xCC;
-    // int bounds[2] = {0};
-    // unsigned int min = _findFreeDensestBlocks(map, 18, &bounds);
-    // printf("%u, %d, %d\n", min, bounds[0], bounds[1]);
-    union Block_HeartyFS *buf = mapDisk_HeartyFS(RDWR_HEARTY_FS);
-    memset(buf, 0, DISK_SIZE);
+    if (rel_path[0] == '/') {
+        errno = EINVAL;
+        return -1;
+    }
+    int id = start_id;
+    char *ptr = rel_path;
+    char *substr = NULL;
+    while (_splitStr(&substr, '/', &ptr)) {
+        if (mem[id].dir.type != TYPE_DIR_HEARTY_FS)
+            break;
 
-    buf[0].dir.type = TYPE_DIR_HEARTY_FS;
-    if (initDir_HeartyFS(buf, "/", 0, 0)) {
-        perror("Cannot map initialize root block\n");
-        exit(1);
+        struct Array entries = {.val = mem[id].dir.entries,
+                                .len = mem[id].dir.len,
+                                .size = sizeof(struct DirEntry_HeartyFS)};
+        int idx = _findStr(substr, &entries, _isDirEntryMatch);
+        if (idx != -1) {
+            id = mem[id].dir.entries[idx].block_id;
+        } else {
+            id = -1;
+            break;
+        }
     }
-    memset(buf[2].bitmap, 0xFF, BITMAP_LEN);
-
-    char path[] = "./../poop/poopinit/../../../poop/../you/are/so/";
-
-    if (initDir_HeartyFS(buf, "you", 7, 0) == -1) {
-        perror("Oh no!");
-    }
-    if (initDir_HeartyFS(buf, "poop", 8, 0) == -1) {
-        perror("Oh no!");
-    }
-    if (initDir_HeartyFS(buf, "poopinit", 9, 8) == -1) {
-        perror("Oh no!");
-    }
-    if (initDir_HeartyFS(buf, "are", 3, 7) == -1) {
-        perror("Oh no!");
-    }
-    if (initDir_HeartyFS(buf, "so", 4, 3) == -1) {
-        perror("Oh no!");
-    }
-    if (initDir_HeartyFS(buf, "dun", 6, 3) == -1) {
-        perror("Oh no!");
-    }
-    int n = 0;
-    printf("type %d, name %s\n", buf[n].dir.type, buf[n].dir.name);
-    for (int i = 0; i < buf[n].dir.len; i++) {
-        printf("e#%d: %s\n", i, buf[n].dir.entries[i].name);
-    }
-    int id = _getNodeID(buf, path, 7);
-    if (id != -1)
-        printf("res: %d, %s\n", id, buf[id].dir.name);
+    return id;
 }
-// [1010 1010]
-// [0101 0101]
