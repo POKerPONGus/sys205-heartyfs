@@ -1,4 +1,4 @@
-#include "_private_heartyfs_utils.h"
+#include "heartyfs.h"
 
 int main()
 {

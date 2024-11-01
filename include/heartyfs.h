@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 
+#define DISK_FILE_PATH "/tmp/heartyfs"
 #define BLOCK_SIZE (1 << 9)
 #define DISK_SIZE (1 << 20)
 #define BLOCK_COUNT (DISK_SIZE / BLOCK_SIZE)

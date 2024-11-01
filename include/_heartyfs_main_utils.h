@@ -1,5 +1,5 @@
-#ifndef _PRIVATE_HEARTYFS_H
-#define _PRIVATE_HEARTYFS_H
+#ifndef _HEARTYFS_MAIN_UTILS_H
+#define _HEARTYFS_MAIN_UTILS_H
 
 #include <errno.h>
 #include <limits.h>
@@ -13,7 +13,6 @@
 
 #include "heartyfs.h"
 
-#define DISK_FILE_PATH "/tmp/heartyfs"
 #define ROOT_ID 0
 #define BITMAP_ID 1
 
@@ -25,17 +24,15 @@ struct Array {
     int len;
 };
 
-struct Interval {
+struct Range {
     int start;
-    int end;
+    int len;
 };
 
-bool _splitStr(char **, char, char **);
-int _findStr(char *, struct Array *, bool(char *, void *));
-void _updateBitmapFree(union Block_HeartyFS *mem, struct Interval bounds);
-void _updateBitmapUsed(union Block_HeartyFS *mem, struct Interval bounds);
-int _findFreeDensestBlocks(uint8_t *, int, struct Interval *);
+void _updateBitmapFree(uint8_t *, struct Range);
+void _updateBitmapUsed(uint8_t *, struct Range);
+bool _findFreeDensestBlocks(uint8_t *, int, struct Range *, struct Range *);
+int _findNextFreeBlock(uint8_t *, int);
 void _initDirEntry(union Block_HeartyFS *, char *, int, int);
 bool _isDirEntryMatch(char *, void *);
-
 #endif
