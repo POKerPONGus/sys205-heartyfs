@@ -1,3 +1,5 @@
+#include <stdlib.h>
+#include <stdio.h>
 #include "heartyfs.h"
 
 #define CMD_LEN 40

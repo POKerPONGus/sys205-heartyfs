@@ -24,15 +24,21 @@ struct Array {
     int len;
 };
 
-struct Range {
+struct Interval {
     int start;
-    int len;
+    int end;
 };
 
-void _updateBitmapFree(uint8_t *, struct Range);
-void _updateBitmapUsed(uint8_t *, struct Range);
-bool _findFreeDensestBlocks(uint8_t *, int, struct Range *, struct Range *);
+void _updateBitmapFree(uint8_t *, struct Interval *);
+void _updateBitmapUsed(uint8_t *, struct Interval *);
+bool _findFreeDensestBlocks(uint8_t *, int, struct Interval *,
+                            struct Interval *);
 int _findNextFreeBlock(uint8_t *, int);
 void _initDirEntry(union Block_HeartyFS *, char *, int, int);
 bool _isDirEntryMatch(char *, void *);
+struct Interval _intArrInterval(int *, int);
+int _calcFileSize(union Block_HeartyFS *, int);
+void _deleteFileData(union Block_HeartyFS *, int);
+int _writeDataBlock(struct DataBlock_HeartyFS *, void *, int,
+                    enum AccessModes_HeartyFS);
 #endif

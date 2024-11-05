@@ -13,15 +13,13 @@
 #define FILE_MAX_BLOCKS 119
 #define DIR_MAX_ENTRIES 14
 #define NAME_MAX_LEN 28
-#define BLOCK_MAX_DATA BLOCK_SIZE - sizeof(int)
+#define BLOCK_MAX_DATA (int)(BLOCK_SIZE - sizeof(int))
 
 #define FILE_MAX_SIZE FILE_MAX_BLOCKS *BLOCK_MAX_DATA
 
 enum InodeTypes_HeartyFS { TYPE_FILE_HEARTY_FS = 0, TYPE_DIR_HEARTY_FS = 1 };
 enum AccessModes_HeartyFS {
-    RDONLY_HEARTY_FS = O_RDONLY,
     WRONLY_HEARTY_FS = O_WRONLY,
-    RDWR_HEARTY_FS = O_RDWR,
     APPEND_HEARTY_FS = O_RDWR + 1
 };
 
@@ -58,6 +56,13 @@ union Block_HeartyFS {
 
 union Block_HeartyFS *mapDisk_HeartyFS();
 void initSys_HeartyFS(union Block_HeartyFS *mem);
-int initDir_HeartyFS(union Block_HeartyFS *, char *, int);
-int getNodeID_HeartyFS(union Block_HeartyFS *, char[], int);
+int initDir_HeartyFS(union Block_HeartyFS *mem, char *, int);
+int initFile_HeartyFS(union Block_HeartyFS *mem, char *name, int parent_id);
+int write_HeartyFS(
+    union Block_HeartyFS *mem, int id, void *data, int size,
+    enum AccessModes_HeartyFS mode); // Maybe change return type to bool
+int read_HeartyFS(union Block_HeartyFS *mem, int id, void *data, int size,
+                  int *offset);
+int getNodeID_HeartyFS(union Block_HeartyFS *mem, char[], int);
+// Add arg names ^^^^^
 #endif

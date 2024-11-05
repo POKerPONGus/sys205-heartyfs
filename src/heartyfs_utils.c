@@ -1,4 +1,6 @@
 #include "_heartyfs_main_utils.h"
+#include "_heartyfs_math_utils.h"
+#include "_heartyfs_string_utils.h"
 
 union Block_HeartyFS *mapDisk_HeartyFS()
 {
@@ -27,7 +29,7 @@ void initSys_HeartyFS(union Block_HeartyFS *mem)
 
     memset(mem[BITMAP_ID].bitmap, 0xFF, BITMAP_LEN);
 
-    _updateBitmapUsed(mem[BITMAP_ID].bitmap, (struct Range){0, 2});
+    _updateBitmapUsed(mem[BITMAP_ID].bitmap, &(struct Interval){0, 2});
 }
 
 int initDir_HeartyFS(union Block_HeartyFS *mem, char *name, int parent_id)
@@ -36,11 +38,8 @@ int initDir_HeartyFS(union Block_HeartyFS *mem, char *name, int parent_id)
     struct Array parent_entries = {.val = parent_dir->entries,
                                    .len = parent_dir->len,
                                    .size = sizeof(struct DirEntry_HeartyFS)};
-    struct Range id_range = {0};
-    if (parent_id == BITMAP_ID) {
-        errno = EFAULT;
-        return -1;
-    } else if (parent_dir->type != TYPE_DIR_HEARTY_FS) {
+    struct Interval id_bounds = {0};
+    if (parent_dir->type != TYPE_DIR_HEARTY_FS) {
         errno = ENOTDIR;
         return -1;
     } else if (parent_dir->len == DIR_MAX_ENTRIES) {
@@ -49,13 +48,14 @@ int initDir_HeartyFS(union Block_HeartyFS *mem, char *name, int parent_id)
     } else if (_findStr(name, &parent_entries, _isDirEntryMatch) != -1) {
         errno = EINVAL;
         return -1;
-    } else if (!_findFreeDensestBlocks(mem[1].bitmap, 1, NULL, &id_range)) {
+    } else if (!_findFreeDensestBlocks(mem[BITMAP_ID].bitmap, 1, NULL,
+                                       &id_bounds)) {
         errno = ENOSPC;
         return -1;
     }
-    _updateBitmapUsed(mem[BITMAP_ID].bitmap, id_range);
+    _updateBitmapUsed(mem[BITMAP_ID].bitmap, &id_bounds);
 
-    int id = id_range.start;
+    int id = id_bounds.start;
     _initDirEntry(mem, name, id, parent_id);
 
     mem[id].dir =
@@ -74,11 +74,8 @@ int initFile_HeartyFS(union Block_HeartyFS *mem, char *name, int parent_id)
     struct Array parent_entries = {.val = parent_dir->entries,
                                    .len = parent_dir->len,
                                    .size = sizeof(struct DirEntry_HeartyFS)};
-    struct Range id_range = {0};
-    if (parent_id == BITMAP_ID) {
-        errno = EFAULT;
-        return -1;
-    } else if (parent_dir->type != TYPE_DIR_HEARTY_FS) {
+    struct Interval id_bounds = {0};
+    if (parent_dir->type != TYPE_DIR_HEARTY_FS) {
         errno = ENOTDIR;
         return -1;
     } else if (parent_dir->len == DIR_MAX_ENTRIES) {
@@ -87,12 +84,13 @@ int initFile_HeartyFS(union Block_HeartyFS *mem, char *name, int parent_id)
     } else if (_findStr(name, &parent_entries, _isDirEntryMatch) != -1) {
         errno = EINVAL;
         return -1;
-    } else if (!_findFreeDensestBlocks(mem[1].bitmap, 1, NULL, &id_range)) {
+    } else if (!_findFreeDensestBlocks(mem[BITMAP_ID].bitmap, 1, NULL,
+                                       &id_bounds)) {
         errno = ENOSPC;
         return -1;
     }
-    _updateBitmapUsed(mem[BITMAP_ID].bitmap, id_range);
-    int id = id_range.start;
+    _updateBitmapUsed(mem[BITMAP_ID].bitmap, &id_bounds);
+    int id = id_bounds.start;
     _initDirEntry(mem, name, id, parent_id);
 
     mem[id].file =
@@ -103,13 +101,7 @@ int initFile_HeartyFS(union Block_HeartyFS *mem, char *name, int parent_id)
     return id;
 }
 
-int _calcFileSize(union Block_HeartyFS *mem, int id)
-{
-    int data_id = mem[id].file.blocks[mem[id].file.len - 1];
-    return (mem[id].file.len - 1) * BLOCK_MAX_DATA + mem[data_id].data.size;
-}
-
-int write_HeartyFS(union Block_HeartyFS *mem, int id, void *data, int size,
+int writeFile_HeartyFS(union Block_HeartyFS *mem, int id, void *data, int size,
                    enum AccessModes_HeartyFS mode)
 {
     struct FileNode_HeartyFS *file = &mem[id].file;
@@ -121,44 +113,91 @@ int write_HeartyFS(union Block_HeartyFS *mem, int id, void *data, int size,
         return -1;
     }
 
-    int offset;
+    struct Interval curr_bounds, *curr_bounds_ptr;
+    int file_size;
     switch (mode) {
     case WRONLY_HEARTY_FS:
-        offset = 0;
+        file_size = 0;
+
+        if (FILE_MAX_SIZE < size) {
+            errno = ENOMEM;
+            return -1;
+        }
+        curr_bounds_ptr = NULL;
+        _deleteFileData(mem, id);
         break;
     case APPEND_HEARTY_FS:
-        offset = _calcFileSize(mem, id);
+        file_size = _calcFileSize(mem, id);
+
+        if (FILE_MAX_SIZE - file_size < size) {
+            errno = ENOMEM;
+            return -1;
+        }
+        curr_bounds = _intArrInterval(file->blocks, file->len);
+        curr_bounds_ptr = &curr_bounds;
         break;
     default:
         errno = EINVAL;
         return -1;
     }
 
-    struct Range block_range;
-    if (FILE_MAX_SIZE - offset < (uint64_t)size) {
-        errno = ENOMEM;
-        return -1;
-    }
-    int len = _ceilDivInt(offset, BLOCK_MAX_DATA);
-    int max_id = INT_MIN;
-    int min_id = INT_MAX;
-    for (int i = 0; i < len; i++) {
-        max_id = _maxInt(max_id, file->blocks[i]);
-        min_id = _minInt(min_id, file->blocks[i]);
-    }
-    struct Range existing_range = {.start = min_id, .len = max_id - min_id};
-    if (!_findFreeDensestBlocks(mem[1].bitmap, 1, NULL, &block_range)) {
+    int new_len = _ceilDivInt(file_size + size, BLOCK_MAX_DATA) - file->len;
+    struct Interval block_bounds;
+    if (!_findFreeDensestBlocks(mem[BITMAP_ID].bitmap, new_len - file->len,
+                                curr_bounds_ptr, &block_bounds)) {
         errno = ENOSPC;
         return -1;
     }
 
-    int curr_block = block_range.start;
-    int end_block = block_range.start + block_range.len;
-    while (size > 0) {
-        curr_block = _findNextFreeBlock(mem[BITMAP_ID].bitmap, curr_block);
-        memcpy(mem[curr_block].data.data, );
-        curr_block++;
+    int curr_block;
+    uint8_t *data_ptr = data;
+    if (file_size > 0) {
+        curr_block = file->blocks[file->len - 1];
+        
+        int size_wrote =
+            _writeDataBlock(&mem[curr_block].data, data_ptr, size, mode);
+        size -= size_wrote;
+        data_ptr += size_wrote;
     }
+    curr_block = block_bounds.start;
+    for (int i = file->len; size > 0 && curr_block < block_bounds.end; i++) {
+        file->blocks[i] = curr_block;
+
+        int size_wrote =
+            _writeDataBlock(&mem[curr_block].data, data_ptr, size, mode);
+        size -= size_wrote;
+        data_ptr += size_wrote;
+        curr_block = _findNextFreeBlock(mem[BITMAP_ID].bitmap, curr_block + 1);
+    }
+    _updateBitmapUsed(mem[BITMAP_ID].bitmap, &block_bounds);
+    file->len = new_len;
+    return id;
+}
+
+int read_HeartyFS(union Block_HeartyFS *mem, int id, void *buf, int size,
+                  int *offset)
+{
+    struct FileNode_HeartyFS *file = &mem[id].file;
+    if (id == BITMAP_ID) {
+        errno = EFAULT;
+        return -1;
+    } else if (file->type != TYPE_FILE_HEARTY_FS) {
+        errno = EISDIR;
+        return -1;
+    }
+    uint8_t *buf_ptr = buf;
+    for (int i = *offset / BLOCK_MAX_DATA; i < file->len && size > 0; i++) {
+        struct DataBlock_HeartyFS *data_block = &mem[file->blocks[i]].data;
+        int block_offset = *offset % BLOCK_MAX_DATA;
+
+        uint8_t *block_ptr = data_block->data + block_offset;
+        int size_read = _minInt(size, data_block->size - block_offset);
+        memcpy(buf_ptr, block_ptr, size_read);
+        *offset += size_read;
+        buf_ptr += size_read;
+        size -= size_read;
+    }
+    return 0;
 }
 
 int getNodeID_HeartyFS(union Block_HeartyFS *mem, char rel_path[], int start_id)

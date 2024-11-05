@@ -1,7 +1,7 @@
 .SECOND_EXPANSION:
 
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -pedantic -Wshadow
+CFLAGS = -Wall -Wextra -Werror -pedantic -Wshadow -g
 BIN_DIR := bin
 OBJ_DIR := obj
 SRC_DIR := src
