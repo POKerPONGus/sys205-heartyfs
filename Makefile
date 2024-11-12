@@ -1,5 +1,3 @@
-.SECOND_EXPANSION:
-
 CC = gcc
 CFLAGS = -Wall -Wextra -Werror -pedantic -Wshadow -Wunused-function -fanalyzer -fsanitize=address -g
 BIN_DIR := bin
@@ -27,18 +25,26 @@ clean:
 	
 # Programs Binaries
 
-$(BIN): $(BIN_DIR)/% : $(BASE_OBJ) $(OP_OBJS) $(UTIL_OBJS)
-	$(CC) $(CFLAGS) $^ -o $@ -I include/
+$(BIN): $(BIN_DIR)/% : $(BASE_OBJ) $(OP_OBJS) $(UTIL_OBJS) $(BIN_DIR)
+	$(CC) $(CFLAGS) $(filter-out $(BIN_DIR),$^) -o $@ -I include/
 
 # Object files
 
-$(OP_OBJS): $(OBJ_DIR)/%.o : $(OP_DIR)/%.c
+$(OP_OBJS): $(OBJ_DIR)/%.o : $(OP_DIR)/%.c $(OBJ_DIR)
 	$(CC) $(CFLAGS) $< -c -o $@ -I include/
 
-$(UTIL_OBJS): $(OBJ_DIR)/%.o : $(UTIL_DIR)/%.c
+$(UTIL_OBJS): $(OBJ_DIR)/%.o : $(UTIL_DIR)/%.c $(OBJ_DIR)
 	$(CC) $(CFLAGS) $< -c -o $@ -I include/
 
-$(BASE_OBJ): $(OBJ_DIR)/%.o : $(SRC_DIR)/%.c
+$(BASE_OBJ): $(OBJ_DIR)/%.o : $(SRC_DIR)/%.c $(OBJ_DIR)
 	$(CC) $(CFLAGS) $< -c -o $@ -I include/
+
+# Directories
+
+$(OBJ_DIR):
+	mkdir $@
+
+$(BIN_DIR):
+	mkdir $@
 
 
